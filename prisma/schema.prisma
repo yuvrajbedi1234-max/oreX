@@ -1,0 +1,55 @@
+// ScopeLock Phase 1 — local dev persistence only.
+// SQLite is used for hackathon speed; swap the datasource provider to
+// PostgreSQL (and update DATABASE_URL) before any real deployment.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Single-user hackathon MVP: at most one row is ever stored, keyed by a
+// fixed id ("singleton") so connect/disconnect is a simple upsert/delete.
+model XeroConnection {
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenantName        String
+  encryptedTokenSet String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Links a ScopeLock project (Phase 2 demo scenario) to the Xero records it
+// was seeded from. Looked up by `slug`, never by customer name — Xero IDs
+// are the source of truth once a project has been seeded.
+model DemoProject {
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  name                  String
+  status                String
+  xeroTenantId          String
+  xeroContactId         String
+  xeroSourceQuoteId     String
+  xeroSourceQuoteNumber String
+  seedReference         String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// Stores only the latest deterministic (or, in Phase 4, AI) Scope Diff
+// result per project/message — not a history/workflow log. Re-running the
+// analysis overwrites this row; resetting deletes it.
+model ScopeAnalysis {
+  id            String   @id @default(cuid())
+  demoProjectId String
+  messageId     String
+  analyserType  String
+  resultJson    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([demoProjectId, messageId])
+}

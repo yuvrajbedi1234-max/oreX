@@ -6,21 +6,40 @@ import { fetchQuoteById } from "@/lib/xero/queries";
 import { normalizeItem } from "@/lib/xero/normalize";
 import type { NormalizedItem, NormalizedQuote } from "@/lib/xero/types";
 import { findItemByCode } from "@/lib/demo/xero-lookups";
+import { DEMO_ITEMS } from "@/lib/demo/demo-types";
+import { analyseWithAI } from "./ai-analyser";
 import { analyseDemoMessage } from "./deterministic-analyser";
-import { getDemoMessage } from "./demo-message";
+import { buildClientMessage, DEMO_MESSAGE_ID, getDemoMessage } from "./demo-message";
 import { calculateSubtotal, calculateVariationLine, findXeroItemByCode } from "./pricing";
-import type { PricedVariationLine, ScopeDiffError, ScopeDiffResult } from "./types";
+import type { DetectedRequest, PricedVariationLine, ScopeAnalyserType, ScopeDiffError, ScopeDiffResult } from "./types";
 
 export type ScopeDiffBuildResult = { status: "ok"; result: ScopeDiffResult } | { status: "error"; error: ScopeDiffError };
 
-const REQUIRED_ITEM_CODES = ["LED-PACK", "SOCKET-MOVE", "HANDLE-BLACK"];
+export interface BuildScopeDiffParams {
+  // Which extraction/classification layer to run. Defaults to AI — the
+  // deterministic analyser is kept as a fallback for development/demo.
+  analyser?: ScopeAnalyserType;
+  // Re-analyse a stored message by id (used for the fixed demo message).
+  messageId?: string;
+  // Analyse an arbitrary client message (AI only). Takes precedence over
+  // messageId when provided.
+  messageText?: string;
+}
 
-// Orchestrates one Scope Diff run: load the project, load the fixed
-// message, retrieve the real Xero quote and pricing items, run the
+// The full seeded pricing catalogue. Phase 3 only needed the three codes the
+// fixed message touched; the AI analyser can match any of them, so we load
+// them all. Loading extra items never breaks the deterministic analyser,
+// which still looks up just the codes it cares about.
+const CATALOGUE_ITEM_CODES = DEMO_ITEMS.map((item) => item.code);
+
+// Orchestrates one Scope Diff run: load the project, resolve the client
+// message, retrieve the real Xero quote and pricing items, run the chosen
 // analyser, price the result from Xero, and persist it. Every failure mode
 // returns a typed error instead of throwing — callers (the API route)
 // decide the HTTP status.
-export async function buildScopeDiff(slug: string, messageId: string): Promise<ScopeDiffBuildResult> {
+export async function buildScopeDiff(slug: string, params: BuildScopeDiffParams = {}): Promise<ScopeDiffBuildResult> {
+  const analyser: ScopeAnalyserType = params.analyser ?? "AI";
+
   const project = await prisma.demoProject.findUnique({ where: { slug } });
   if (!project) {
     return {
@@ -29,9 +48,16 @@ export async function buildScopeDiff(slug: string, messageId: string): Promise<S
     };
   }
 
-  const message = getDemoMessage(messageId);
+  // Resolve the message. A custom messageText (AI only) is turned into a
+  // message with a stable derived id; otherwise we use the fixed demo
+  // fixture by id.
+  const customText = params.messageText?.trim();
+  const message = customText
+    ? buildClientMessage(customText, new Date().toISOString())
+    : getDemoMessage(params.messageId ?? DEMO_MESSAGE_ID);
+
   if (!message) {
-    return { status: "error", error: { code: "invalid_message", message: `Unknown message id "${messageId}".` } };
+    return { status: "error", error: { code: "invalid_message", message: `Unknown message id "${params.messageId}".` } };
   }
 
   let quote: NormalizedQuote;
@@ -61,7 +87,7 @@ export async function buildScopeDiff(slug: string, messageId: string): Promise<S
     // Sequential, not Promise.all — Xero enforces a per-app concurrent-
     // request limit and rejects bursts with a 429 "concurrent" error.
     const found = [];
-    for (const code of REQUIRED_ITEM_CODES) {
+    for (const code of CATALOGUE_ITEM_CODES) {
       found.push(await findItemByCode(client, tenantId, code));
     }
     items = found.filter((item): item is NonNullable<typeof item> => item != null).map(normalizeItem);
@@ -76,7 +102,24 @@ export async function buildScopeDiff(slug: string, messageId: string): Promise<S
     return { status: "error", error: { code: "pricing_item_missing", message: appError.message } };
   }
 
-  const requests = analyseDemoMessage({ quote, items });
+  // Run the chosen analyser. The AI analyser can fail (no key / bad output);
+  // the deterministic analyser cannot. Both produce DetectedRequest[].
+  let requests: DetectedRequest[];
+  if (analyser === "AI") {
+    const outcome = await analyseWithAI({
+      message: message.text,
+      quote,
+      items,
+      projectName: project.name,
+      customerName: quote.contactName ?? project.name,
+    });
+    if (outcome.status === "error") {
+      return { status: "error", error: outcome.error };
+    }
+    requests = outcome.requests;
+  } else {
+    requests = analyseDemoMessage({ quote, items });
+  }
 
   const variationLines: PricedVariationLine[] = [];
   for (const request of requests) {
@@ -91,11 +134,12 @@ export async function buildScopeDiff(slug: string, messageId: string): Promise<S
     projectId: project.slug,
     sourceQuoteId: project.xeroSourceQuoteId,
     messageId: message.id,
+    messageText: message.text,
     requests,
     variationLines,
     subtotal: calculateSubtotal(variationLines),
     analysedAt: new Date().toISOString(),
-    analyser: "DETERMINISTIC_DEMO",
+    analyser,
   };
 
   await prisma.scopeAnalysis.upsert({

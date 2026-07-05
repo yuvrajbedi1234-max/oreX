@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildScopeDiff, loadStoredScopeDiff, resetScopeDiff } from "@/lib/scope-diff/build-scope-diff";
 import { DEMO_MESSAGE_ID } from "@/lib/scope-diff/demo-message";
-import type { ScopeDiffErrorCode } from "@/lib/scope-diff/types";
+import type { ScopeAnalyserType, ScopeDiffErrorCode } from "@/lib/scope-diff/types";
 
 const STATUS_BY_CODE: Record<ScopeDiffErrorCode, number> = {
   project_not_found: 404,
@@ -11,28 +11,43 @@ const STATUS_BY_CODE: Record<ScopeDiffErrorCode, number> = {
   pricing_item_missing: 404,
   insufficient_permissions: 403,
   invalid_message: 400,
+  // AI analysis isn't configured / the model call failed → treat as a
+  // temporarily-unavailable dependency; the UI offers the deterministic
+  // fallback. Bad AI output is an upstream (502) failure.
+  ai_unavailable: 503,
+  ai_invalid_output: 502,
   unknown: 502,
 };
 
 interface ScopeDiffRequestBody {
   messageId?: string;
+  messageText?: string;
+  analyser?: ScopeAnalyserType;
 }
 
-// Runs the Scope Diff analysis: real Xero quote + real Xero pricing items
-// + the fixed deterministic demo analyser. Never creates, sends, or
-// authorises anything in Xero.
+function normalizeAnalyser(value: unknown): ScopeAnalyserType | undefined {
+  return value === "AI" || value === "DETERMINISTIC_DEMO" ? value : undefined;
+}
+
+// Runs the Scope Diff analysis: real Xero quote + real Xero pricing items +
+// the selected analyser (AI by default, deterministic as a fallback). Never
+// creates, sends, or authorises anything in Xero.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  let messageId = DEMO_MESSAGE_ID;
+  let messageId: string | undefined = DEMO_MESSAGE_ID;
+  let messageText: string | undefined;
+  let analyser: ScopeAnalyserType | undefined;
   try {
     const body = (await request.json()) as ScopeDiffRequestBody;
     if (body.messageId) messageId = body.messageId;
+    if (typeof body.messageText === "string" && body.messageText.trim()) messageText = body.messageText;
+    analyser = normalizeAnalyser(body.analyser);
   } catch {
     // No/invalid JSON body — fall back to the default demo message id.
   }
 
-  const outcome = await buildScopeDiff(slug, messageId);
+  const outcome = await buildScopeDiff(slug, { messageId, messageText, analyser });
   if (outcome.status === "error") {
     return NextResponse.json(
       { error: outcome.error.message, code: outcome.error.code },

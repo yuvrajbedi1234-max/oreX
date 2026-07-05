@@ -40,6 +40,8 @@ cp .env.example .env
 | `XERO_SCOPES` | Space-separated granular scopes (see default in `.env.example`) |
 | `TOKEN_ENCRYPTION_KEY` | 32-byte base64 key used to encrypt stored tokens |
 | `DATABASE_URL` | SQLite connection string, e.g. `file:./dev.db` |
+| `ANTHROPIC_API_KEY` | **(Phase 4)** Anthropic API key for the AI Scope Diff analyser. Optional — without it, use the "Deterministic Demo" analyser fallback. |
+| `SCOPELOCK_AI_MODEL` | **(Phase 4, optional)** Override the Claude model used for AI analysis. Defaults to `claude-opus-4-8`. |
 
 Never commit `.env` — it's already gitignored.
 

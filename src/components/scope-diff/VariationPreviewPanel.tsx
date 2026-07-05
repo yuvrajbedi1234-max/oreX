@@ -1,13 +1,15 @@
+import Link from "next/link";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
 import type { PricedVariationLine, ProjectSummary } from "./types";
 
 export function VariationPreviewPanel({
   project,
+  messageId,
   variationLines,
   subtotal,
 }: {
   project: ProjectSummary;
+  messageId: string;
   variationLines: PricedVariationLine[];
   subtotal: number;
 }) {
@@ -57,9 +59,12 @@ export function VariationPreviewPanel({
           Pricing retrieved from Xero. ScopeLock does not generate financial amounts.
         </p>
 
-        <Button variant="secondary" disabled title="Coming in Phase 5">
+        <Link
+          href={`/projects/${project.slug}/variation-review?messageId=${encodeURIComponent(messageId)}`}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-400"
+        >
           Review variation
-        </Button>
+        </Link>
       </CardBody>
     </Card>
   );

@@ -47,6 +47,9 @@ export interface ScopeDiffResult {
   projectId: string;
   sourceQuoteId: string;
   messageId: string;
+  // The exact client message that was analysed. Stored so Phase 5's
+  // variation review can render it without re-deriving it from a fixture.
+  messageText: string;
   requests: DetectedRequest[];
   variationLines: PricedVariationLine[];
   subtotal: number;
@@ -62,6 +65,12 @@ export type ScopeDiffErrorCode =
   | "pricing_item_missing"
   | "insufficient_permissions"
   | "invalid_message"
+  // Phase 4 — the AI analyser couldn't run (no API key configured, or the
+  // model call failed) or it returned output that failed schema/business-
+  // rule validation. Either way the caller can fall back to the
+  // deterministic analyser.
+  | "ai_unavailable"
+  | "ai_invalid_output"
   | "unknown";
 
 export interface ScopeDiffError {

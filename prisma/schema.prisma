@@ -53,3 +53,31 @@ model ScopeAnalysis {
 
   @@unique([demoProjectId, messageId])
 }
+
+// Phase 5 — records a DRAFT variation quote that was actually created in
+// Xero from a reviewed/approved scope diff. Storing the returned QuoteID is
+// the duplicate protection: the approval flow refuses to create a second
+// quote for the same (project, message, revision). "Create another
+// revision" bumps `revision` deliberately. The original Xero quote is never
+// touched — this only ever inserts a brand-new draft.
+model Variation {
+  id              String   @id @default(cuid())
+  demoProjectId   String
+  messageId       String
+  revision        Int
+  xeroQuoteId     String
+  xeroQuoteNumber String
+  xeroQuoteStatus String
+  title           String
+  reference       String
+  subtotal        Float
+  totalTax        Float
+  total           Float
+  currencyCode    String?
+  // The exact priced lines that were sent to Xero, as JSON.
+  linesJson       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([demoProjectId, messageId, revision])
+}

@@ -37,15 +37,18 @@ export interface PricedVariationLine {
   priceSource: "XERO_ITEM";
 }
 
+export type ScopeAnalyserType = "DETERMINISTIC_DEMO" | "AI";
+
 export interface ScopeDiffResult {
   projectId: string;
   sourceQuoteId: string;
   messageId: string;
+  messageText: string;
   requests: DetectedRequest[];
   variationLines: PricedVariationLine[];
   subtotal: number;
   analysedAt: string;
-  analyser: "DETERMINISTIC_DEMO" | "AI";
+  analyser: ScopeAnalyserType;
 }
 
 export interface DemoMessage {

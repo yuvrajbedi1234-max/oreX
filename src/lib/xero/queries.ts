@@ -110,3 +110,91 @@ export async function createTestDraftQuote(contactId: string): Promise<Normalize
     throw toXeroAppError(err);
   }
 }
+
+export interface VariationDraftLine {
+  description: string;
+  quantity: number;
+  unitAmount: number;
+  accountCode?: string;
+  taxType?: string;
+  itemCode?: string;
+}
+
+export interface VariationDraftQuoteInput {
+  contactId: string;
+  title: string;
+  reference: string;
+  summary: string;
+  lineItems: VariationDraftLine[];
+}
+
+export interface CreatedVariationQuote {
+  quoteId: string;
+  quoteNumber: string;
+  status: string;
+  title: string;
+  reference: string;
+  subTotal: number;
+  totalTax: number;
+  total: number;
+  currencyCode: string | null;
+}
+
+function toNum(value: unknown): number {
+  return typeof value === "number" && !Number.isNaN(value) ? value : 0;
+}
+
+// Phase 5 — creates exactly one DRAFT variation quote in Xero from reviewed,
+// owner-approved lines. Status is always DRAFT: it is never authorised or
+// sent. The original agreed quote is untouched — this only inserts a new
+// draft. Callers must enforce duplicate protection before calling this.
+export async function createVariationDraftQuote(input: VariationDraftQuoteInput): Promise<CreatedVariationQuote> {
+  try {
+    const { client, tenantId } = await getAuthenticatedClient();
+    const issueDate = new Date();
+    const expiryDate = new Date(issueDate);
+    expiryDate.setDate(expiryDate.getDate() + 30);
+    const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+    const res = await client.accountingApi.createQuotes(tenantId, {
+      quotes: [
+        {
+          contact: { contactID: input.contactId },
+          reference: input.reference,
+          title: input.title,
+          summary: input.summary,
+          date: toIsoDate(issueDate),
+          expiryDate: toIsoDate(expiryDate),
+          status: QuoteStatusCodes.DRAFT,
+          lineItems: input.lineItems.map((line) => ({
+            description: line.description,
+            quantity: line.quantity,
+            unitAmount: line.unitAmount,
+            ...(line.accountCode ? { accountCode: line.accountCode } : {}),
+            ...(line.taxType ? { taxType: line.taxType } : {}),
+            ...(line.itemCode ? { itemCode: line.itemCode } : {}),
+          })),
+        },
+      ],
+    });
+
+    const created = res.body.quotes?.[0];
+    if (!created || !created.quoteID) {
+      throw new Error("Xero did not return the created quote.");
+    }
+
+    return {
+      quoteId: created.quoteID,
+      quoteNumber: created.quoteNumber ?? "",
+      status: created.status ? String(created.status) : "DRAFT",
+      title: created.title ?? input.title,
+      reference: created.reference ?? input.reference,
+      subTotal: toNum(created.subTotal),
+      totalTax: toNum(created.totalTax),
+      total: toNum(created.total),
+      currencyCode: created.currencyCode ? String(created.currencyCode) : null,
+    };
+  } catch (err) {
+    throw toXeroAppError(err);
+  }
+}
